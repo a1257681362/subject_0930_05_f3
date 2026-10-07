@@ -56,11 +56,13 @@ public class BatchService {
     private final CareLogMapper careLogMapper;
     private final NumberGenerator numberGenerator;
     private final OperatorResolver operatorResolver;
+    private final NutrientRecipeService nutrientRecipeService;
 
     public BatchService(BatchMapper batchMapper, VarietyMapper varietyMapper, TrayMapper trayMapper,
                         GreenhouseMapper greenhouseMapper, ZoneMapper zoneMapper,
                         RelocationMapper relocationMapper, CareLogMapper careLogMapper,
-                        NumberGenerator numberGenerator, OperatorResolver operatorResolver) {
+                        NumberGenerator numberGenerator, OperatorResolver operatorResolver,
+                        NutrientRecipeService nutrientRecipeService) {
         this.batchMapper = batchMapper;
         this.varietyMapper = varietyMapper;
         this.trayMapper = trayMapper;
@@ -70,6 +72,7 @@ public class BatchService {
         this.careLogMapper = careLogMapper;
         this.numberGenerator = numberGenerator;
         this.operatorResolver = operatorResolver;
+        this.nutrientRecipeService = nutrientRecipeService;
     }
 
     /** 播种建档：生成唯一批次号，关联品种、播种盘、计划采收日。 */
@@ -110,6 +113,8 @@ public class BatchService {
         batch.setPlannedHarvestDate(request.getPlannedHarvestDate());
         batch.setStatus(PfStatus.BATCH_SOWN);
         batch.setStartupFlag("N");
+        // 钉住播种当时发布的营养配方版本：后续新版本发布不影响在田批次
+        batch.setNutrientRecipeId(currentPublishedNutrientRecipeId(variety.getId()));
         batch.setRemark(request.getRemark());
         try {
             batchMapper.insert(batch);
@@ -257,6 +262,7 @@ public class BatchService {
         batch.setPlannedHarvestDate(java.time.LocalDate.now().plusDays(variety.getGrowDays()));
         batch.setStatus(PfStatus.BATCH_SOWN);
         batch.setStartupFlag(STARTUP_FLAG_YES);
+        batch.setNutrientRecipeId(currentPublishedNutrientRecipeId(variety.getId()));
         batch.setRemark("植物工厂种植批次台账起步");
         try {
             batchMapper.insert(batch);
@@ -273,6 +279,12 @@ public class BatchService {
         log.info("起步批次已创建: batchNo={}, id={}, operator={}",
                 batch.getBatchNo(), batch.getId(), CurrentOperator.id());
         return batch;
+    }
+
+    /** 品种当前发布的营养配方版本 id（无发布版则为 null，批次允许暂无配方）。 */
+    private Long currentPublishedNutrientRecipeId(Long varietyId) {
+        com.evops.plant.entity.NutrientRecipe published = nutrientRecipeService.publishedForVariety(varietyId);
+        return published == null ? null : published.getId();
     }
 
     private Batch requireActiveBatch(Long batchId) {

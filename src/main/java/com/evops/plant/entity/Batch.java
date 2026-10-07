@@ -26,5 +26,7 @@ public class Batch extends BaseEntity {
     private String status;
     /** Y=定时任务创建的"台账起步"批次 */
     private String startupFlag;
+    /** 播种时钉住的营养配方版本（历史批次继续引用当时的版本，新发布不影响在田批次） */
+    private Long nutrientRecipeId;
     private String remark;
 }

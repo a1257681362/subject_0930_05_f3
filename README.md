@@ -72,6 +72,38 @@
 
 种子数据：V001 奶油生菜两阶段配方（育苗 0–14 天 150PPFD / 生长 14 天起 220PPFD，已发布 v1）；A 区 LA01/LA02、B 区 LB01 正常，LB02 故障（演示重试队列）。设备下发由 `LightDeviceGateway` 模拟（非 ACTIVE 即失败），接真实灯控协议时替换 `SimulatedLightDeviceGateway`。
 
+## 植物营养液配方
+
+配方 = 氮磷钾 + 微量元素 + 目标电导值（版本 `pf-nutrient-1`）。发布走两级审批，发布前校验元素兼容性；原料按批号入库、过期禁止投加；投加记录水箱/批号/浓度/操作人；补加与排放分别记账；配方与原料批号双向可追溯。
+
+业务表：
+
+- `t_pf_nutrient_recipe` 配方版本主表：氮磷钾 ppm + 目标电导值；同一 `recipe_code` 逐版递增，任一时间至多一个 PUBLISHED
+- `t_pf_nutrient_recipe_element` 微量元素明细（FE/MN/ZN/...，不允许重复，不允许占用主表氮磷钾）
+- `t_pf_nutrient_recipe_approval` 审批步骤留痕（只追加）：1=农艺审核、2=生产批准
+- `t_pf_nutrient_incompatibility` 元素兼容规则：两元素共存浓度之和超上限禁止发布（种子：CA+P、CA+S、FE+P）
+- `t_pf_nutrient_material` 原料档案、`t_pf_nutrient_material_lot` 原料批号（`lot_no` 全局唯一，有效期必填）
+- `t_pf_nutrient_tank` 水箱（隶属温室/分区）
+- `t_pf_nutrient_dosing` 投加记录（只追加）：水箱+批号+浓度+操作人，批号/原料名快照冗余
+- `t_pf_nutrient_tank_ledger` 水箱台账（只追加）：`REPLENISH` 补加 / `DISCHARGE` 排放分别记账，互不冲抵
+- `t_pf_batch.nutrient_recipe_id` 播种时钉住当时发布的配方版本
+
+核心规则：
+
+- **两级审批**：草稿提交后进入 `PENDING_APPROVAL`（待处理）；每级审批留痕；**审批只完成一半（1/2）时配方一直停留待处理**，集齐两级才发布并归档同编码旧发布版；提交与最终发布时各做一次兼容性校验（规则可能在审批期间调整）
+- **兼容性校验**：任一兼容规则涉及的两个元素都在配方中且浓度之和超上限即拒绝（`NutrientChecks` 纯函数，由 `NutrientChecksTest` 锁定）
+- **过期原料不能使用**：批号有效期早于当天禁止入库、禁止投加；投加还校验批号归属原料与在库状态
+- **历史批次钉版**：批次播种时引用当时 PUBLISHED 版本，新版本发布不影响在田批次；功能上线前的历史批次该字段为空
+- **可追溯**：配方版本 → 引用它的批次（`GET /{id}/batches`）；原料批号 → 全部投加记录（`GET /lots/{lotId}/dosings`）；投加/台账均快照操作人
+
+接口：
+
+- 配方：`POST/GET /api/pf/nutrient-recipes`、`GET /{id}/elements`、`GET /{id}/approvals`、`GET /{id}/batches`、`POST /{id}/submit`、`POST /{id}/approve`（每调用一次完成一级）
+- 原料：`POST/GET /api/pf/nutrient-materials`、`POST /{id}/lots`（批号入库）、`GET /lots`、`GET /lots/{lotId}/dosings`（批号追溯）
+- 水箱：`GET /api/pf/nutrient-tanks`、`POST /{id}/dosings`（投加）、`POST /{id}/replenish`（补加）、`POST /{id}/discharge`（排放）、`GET /{id}/ledger?type=REPLENISH|DISCHARGE`（分别查账）
+
+种子数据：兼容规则 3 条；水箱 TK-A01/TK-B01；原料 4 种与批号 3 个（`LOT-MGSO4-2406` 已过期，演示投加拦截）；V001 奶油生菜营养配方 v1（EC 1.8，N180/P50/K220 + FE/MN，已发布）。
+
 注意：低熵环境（容器/虚拟机）下 `/dev/random` 会阻塞会话 ID 生成导致请求挂起，`mvn spring-boot:run` 已在 pom 中配置 `-Djava.security.egd=file:/dev/./urandom` 规避；生产部署请按环境自行评估。
 
 
