@@ -72,6 +72,41 @@
 
 种子数据：V001 奶油生菜两阶段配方（育苗 0–14 天 150PPFD / 生长 14 天起 220PPFD，已发布 v1）；A 区 LA01/LA02、B 区 LB01 正常，LB02 故障（演示重试队列）。设备下发由 `LightDeviceGateway` 模拟（非 ACTIVE 即失败），接真实灯控协议时替换 `SimulatedLightDeviceGateway`。
 
+## 植物营养液
+
+管理营养液配方（氮磷钾盐类 + 微量元素 + 目标电导值 EC/pH），原料按批号入库并管控效期，水箱补加/排放两步审批、分别记账（版本 `pf-nutrient-1`）。
+
+业务表：
+
+- `t_pf_nutrient_material` 原料目录：`compat_group` 兼容组（CALCIUM 钙系 / PHOS_SULFUR 磷硫系 / NEUTRAL 通用）+ 默认母液罐
+- `t_pf_nutrient_stock` 原料批号库存：批号唯一、入库量/余额、生产日期/有效期；余额随补加批准原子扣减
+- `t_pf_nutrient_recipe` 营养配方版本主表（target_ec/target_ph，同 code 逐版，至多一个 PUBLISHED）
+- `t_pf_nutrient_recipe_item` 配方明细（不可变快照：原料、母液罐 A/B/C、每吨剂量克/吨）
+- `t_pf_water_tank` 水箱（容量）
+- `t_pf_nutrient_dosing` 补加单 + `t_pf_nutrient_dosing_item` 批号级行（物料/批号/有效期/母液罐/实投克数全量快照）
+- `t_pf_nutrient_discharge` 排放单（与补加独立单据）
+- `t_pf_nutrient_tank_ledger` 水箱台账（只追加：DOSING 正向 / DISCHARGE 负向，余额逐笔滚算）
+
+核心规则：
+
+- **发布前校验兼容性**（`NutrientRules`，由 `NutrientRulesTest` 锁定）：钙系（硝酸钙）与磷硫系（磷酸二氢钾、硫酸镁）**同母液罐会沉淀**，必须分罐；创建草稿与发布两次校验
+- **原料过期不能使用**：有效期当天仍可用，次日起过期；批号在**提交**与**审批**两个时刻各校验一次（提交后过期的批号也无法出库）；过期批号也禁止入库
+- **两步审批、审批只完成一半时停留待处理**：补加/排放提交后为 PENDING，**不扣库存、不记台账**；批准才扣减批号库存（条件更新原子扣减，余额不足整笔回滚）并写台账，驳回必填原因
+- **提交与审批强制两人**：新增审批账号 `approver/approver`（operator#2 营养液审批员），`POST /{id}/approve|reject` 不得由提交人本人调用
+- **补加和排放分别记账**：两类单据各自编号（`ND-`/`NX-` + 序列）、各自列表，台账以 change_type 区分正负向
+- **历史批次继续引用当时配方版本**：批次首次批准的补加钉住配方版本，之后只能引用同版（已 ARCHIVED 版仍允许历史批次使用）；未钉版的新批次才取当前 PUBLISHED 版
+- **可追溯**：批号 → `GET /stocks/{id}/usage` 反查所有补加行；配方版本 → `GET /nutrient-recipes/{id}/dosings`；批次/水箱 → 单据列表；行内快照物料编码/批号/有效期
+
+接口（HTTP Basic；提交/投加用 `bootstrap/bootstrap`，审批用 `approver/approver`）：
+
+- 原料/批号：`POST/GET /api/pf/nutrient-materials`、`POST /{materialId}/stocks`（入库）、`GET /stocks`、`GET /stocks/{id}`、`GET /stocks/{id}/usage`
+- 配方：`POST/GET /api/pf/nutrient-recipes`、`GET /{id}/items`、`POST /{id}/publish`、`GET /{id}/dosings`
+- 水箱：`POST/GET /api/pf/water-tanks`、`GET /{id}/balance`、`GET /{id}/ledger`
+- 补加：`POST /api/pf/nutrient-dosings`、`GET`（可按 tankId/batchId/status 过滤）、`GET /pending`、`GET /{id}/items`、`POST /{id}/approve`、`POST /{id}/reject`
+- 排放：`POST /api/pf/nutrient-discharges`、`GET`、`GET /pending`、`POST /{id}/approve`、`POST /{id}/reject`
+
+种子数据：硝酸钙/硝酸钾/磷酸二氢钾/硫酸镁/EDTA 微肥五种原料；硫酸镁含一条 2025 年到期的**过期批号**演示禁用；NR-V001 奶油生菜配方 v1（EC 1.80/pH 6.00，A 罐钙系、B 罐磷硫系，已发布）；WT-A01/WT-B01 水箱；一张固定编号 `ND-DEMO-PENDING-0001` 的**待处理补加单**演示"审批只完成一半"（PENDING，未扣库存未记账）。含运行态列（库存余额、配方/单据状态）的种子统一用 `INSERT ... WHERE NOT EXISTS`，重启不覆盖业务数据；仅不可变主数据（原料、水箱）用 MERGE。
+
 注意：低熵环境（容器/虚拟机）下 `/dev/random` 会阻塞会话 ID 生成导致请求挂起，`mvn spring-boot:run` 已在 pom 中配置 `-Djava.security.egd=file:/dev/./urandom` 规避；生产部署请按环境自行评估。
 
 

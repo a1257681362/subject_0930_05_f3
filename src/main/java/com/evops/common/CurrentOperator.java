@@ -21,6 +21,7 @@ public final class CurrentOperator {
     static {
         Map<String, Long> m = new HashMap<>();
         m.put("bootstrap", 1L);
+        m.put("approver", 2L);
         ACCOUNT_TO_OPERATOR = Collections.unmodifiableMap(m);
     }
 

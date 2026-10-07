@@ -13,6 +13,8 @@ public class ShiroConfig {
     public Realm localRealm() {
         SimpleAccountRealm realm = new SimpleAccountRealm();
         realm.addAccount("bootstrap", "bootstrap", "system");
+        // 营养液审批员：与提交/投加操作人分离，补加/排放两步审批不得本人审批本人
+        realm.addAccount("approver", "approver", "system");
         return realm;
     }
 
